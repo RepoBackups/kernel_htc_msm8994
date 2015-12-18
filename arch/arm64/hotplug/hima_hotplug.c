@@ -266,7 +266,7 @@ static int __ref hima_hotplug_start(void)
 
 	notif.notifier_call = fb_notifier_callback;
 	if (fb_register_client(&notif)) {
-		pr_err("%s: Failed to register State notifier callback\n",
+		pr_err("%s: Failed to register fb notifier callback\n",
 			HIMA_HOTPLUG);
 		goto err_dev;
 	}
