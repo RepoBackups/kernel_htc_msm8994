@@ -18,10 +18,7 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/kobject.h>
-
-#ifdef CONFIG_STATE_NOTIFIER
-#include <linux/state_notifier.h>
-#endif
+#include <linux/fb.h>
 
 #include <linux/cpufreq.h>
 
@@ -30,11 +27,11 @@
 #define HIMA_HOTPLUG_MINOR_VERSION     5
 
 #define DEF_SAMPLING_MS                HZ * 5
-#define RESUME_SAMPLING_MS             HZ / 10
+#define RESUME_SAMPLING_MS             HZ
 #define START_DELAY_MS                 HZ * 50
 
 #define DEFAULT_MIN_CPUS_ONLINE        1
-#define DEFAULT_MAX_CPUS_ONLINE        5
+#define DEFAULT_MAX_CPUS_ONLINE        8
 #define DEFAULT_MIN_UP_TIME            1500
 
 #define DEFAULT_NR_FSHIFT              3
@@ -48,7 +45,7 @@
 
 #define CPU_NR_THRESHOLD	       ((THREAD_CAPACITY << 1) - (THREAD_CAPACITY >> 1))
 
-#define MULT_FACTOR                    10
+#define MULT_FACTOR                    11
 #define DIV_FACTOR                     100000
 
 static struct delayed_work hima_hotplug_work;
@@ -58,7 +55,7 @@ static struct notifier_block notif;
 
 struct ip_cpu_info {
 	unsigned long cpu_nr_running;
-	unsigned long cpu_up_time;
+	//unsigned long cpu_up_time;
 };
 static DEFINE_PER_CPU(struct ip_cpu_info, ip_info);
 
@@ -66,7 +63,7 @@ static DEFINE_PER_CPU(struct ip_cpu_info, ip_info);
 static atomic_t hima_hotplug_active = ATOMIC_INIT(1);
 static unsigned int min_cpus_online = DEFAULT_MIN_CPUS_ONLINE;
 static unsigned int max_cpus_online = DEFAULT_MAX_CPUS_ONLINE;
-static unsigned int min_cpu_up_time = DEFAULT_MIN_UP_TIME;
+//static unsigned int min_cpu_up_time = DEFAULT_MIN_UP_TIME;
 
 static unsigned int current_profile_no = 0;
 static unsigned int cpu_nr_run_threshold = CPU_NR_THRESHOLD;
@@ -77,19 +74,26 @@ static unsigned int def_sampling_ms = DEF_SAMPLING_MS;
 static unsigned int nr_fshift = DEFAULT_NR_FSHIFT;
 
 static unsigned int nr_run_thresholds_balanced[] = {
-	(THREAD_CAPACITY * 1 * MULT_FACTOR * 2) / DIV_FACTOR,
-	(THREAD_CAPACITY * 400 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 100 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 300 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 500 * MULT_FACTOR * 2) / DIV_FACTOR,
 	(THREAD_CAPACITY * 800 * MULT_FACTOR * 2) / DIV_FACTOR,
-	(THREAD_CAPACITY * 1150 * MULT_FACTOR * 2) / DIV_FACTOR,
-	(THREAD_CAPACITY * 1400 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1100 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1300 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1500 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1750 * MULT_FACTOR * 2) / DIV_FACTOR,
 	UINT_MAX
 };
 
 static unsigned int nr_run_thresholds_eco[] = {
-        (THREAD_CAPACITY * 50 * MULT_FACTOR * 2) / DIV_FACTOR,
-        (THREAD_CAPACITY * 275 * MULT_FACTOR * 2) / DIV_FACTOR,
-        (THREAD_CAPACITY * 550 * MULT_FACTOR * 2) / DIV_FACTOR,
-	(THREAD_CAPACITY * 800 * MULT_FACTOR * 2) / DIV_FACTOR,
+        (THREAD_CAPACITY * 150 * MULT_FACTOR * 2) / DIV_FACTOR,
+        (THREAD_CAPACITY * 475 * MULT_FACTOR * 2) / DIV_FACTOR,
+        (THREAD_CAPACITY * 650 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 900 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1200 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1500 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 1900 * MULT_FACTOR * 2) / DIV_FACTOR,
+	(THREAD_CAPACITY * 2200 * MULT_FACTOR * 2) / DIV_FACTOR,
         UINT_MAX
 };
 
@@ -138,10 +142,10 @@ static void update_per_cpu_stat(void)
 		l_ip_info->cpu_nr_running = avg_cpu_nr_running(cpu);
 	}
 
-	for_each_cpu_not(cpu, cpu_online_mask) {
+	/*for_each_cpu_not(cpu, cpu_online_mask) {
 		l_ip_info = &per_cpu(ip_info, cpu);
                 l_ip_info->cpu_up_time = 0;
-	}
+	}*/
 }
 
 static void __ref cpu_up_down_work(struct work_struct *work)
@@ -162,31 +166,33 @@ static void __ref cpu_up_down_work(struct work_struct *work)
 	else if (target > max_cpus_online)
 		target = max_cpus_online;
 
-	/* Break early if we are on target */
-	if(target == online_cpus)
-		return;
-	else if (target < online_cpus) {
+	if (target < online_cpus) {
 		update_per_cpu_stat();
 		for_each_online_cpu(cpu) {
-			l_ip_info = &per_cpu(ip_info, cpu);
+			//l_ip_info = &per_cpu(ip_info, cpu);
 
-			if (cpu == 0 || (cpu == 4 && screen_on && current_profile_no == 0)
-				|| ((ktime_to_ms(ktime_get()) - l_ip_info->cpu_up_time) < min_cpu_up_time))
+			if (cpu == 0 || (cpu == 4 && screen_on)) //|| ((ktime_to_ms(ktime_get()) - l_ip_info->cpu_up_time) < min_cpu_up_time))
 				continue;
+
 			l_nr_threshold = cpu_nr_run_threshold << 1 / (num_online_cpus());
-				if (l_ip_info->cpu_nr_running < l_nr_threshold)
+
+			if (l_ip_info->cpu_nr_running < l_nr_threshold)
 				cpu_down(cpu);
+
 			if (num_online_cpus() <= target)
 				break;
 		}
 	} else {
 		update_per_cpu_stat();
 		for_each_cpu_not(cpu, cpu_online_mask) {
-			if(((cpu < 4) && current_profile_no == 0 && screen_on) || cpu == 0)
+
+			if(cpu == 0)
 				continue;
+
 			cpu_up(cpu);
-			l_ip_info = &per_cpu(ip_info, cpu);
-			l_ip_info->cpu_up_time = ktime_to_ms(ktime_get());
+			/*l_ip_info = &per_cpu(ip_info, cpu);
+			l_ip_info->cpu_up_time = ktime_to_ms(ktime_get());*/
+
 			if (num_online_cpus() >= target)
 				break;
 		}
@@ -212,7 +218,7 @@ static void __ref hima_hotplug_resume(void)
 {
 	static int cpu = 0;
 
-	max_cpus_online = 5;
+	max_cpus_online = 8;
 	screen_on = 1;
 
 	/* Bring all cores on for fast resume */
@@ -220,18 +226,23 @@ static void __ref hima_hotplug_resume(void)
 		cpu_up(cpu);
 }
 
-#ifdef CONFIG_STATE_NOTIFIER
-static int state_notifier_callback(struct notifier_block *this,
+static int fb_notifier_callback(struct notifier_block *this,
 				unsigned long event, void *data)
 {
+	struct fb_event *evdata = data;
+	int *blank = evdata->data;
+
 	if (atomic_read(&hima_hotplug_active) == 0)
 		return NOTIFY_OK;
 
-	switch (event) {
-		case STATE_NOTIFIER_ACTIVE:
+	if (event != FB_EVENT_BLANK)
+		return NOTIFY_OK;
+
+	switch (*blank) {
+		case FB_BLANK_UNBLANK:
 			hima_hotplug_resume();
 			break;
-		case STATE_NOTIFIER_SUSPEND:
+		case FB_BLANK_POWERDOWN:
 			hima_hotplug_suspend();
 			break;
 		default:
@@ -240,7 +251,6 @@ static int state_notifier_callback(struct notifier_block *this,
 
 	return NOTIFY_OK;
 }
-#endif
 
 static int __ref hima_hotplug_start(void)
 {
@@ -254,14 +264,12 @@ static int __ref hima_hotplug_start(void)
 		goto err_out;
 	}
 
-#ifdef CONFIG_STATE_NOTIFIER
-	notif.notifier_call = state_notifier_callback;
-	if (state_register_client(&notif)) {
+	notif.notifier_call = fb_notifier_callback;
+	if (fb_register_client(&notif)) {
 		pr_err("%s: Failed to register State notifier callback\n",
 			HIMA_HOTPLUG);
 		goto err_dev;
 	}
-#endif
 
 	INIT_WORK(&up_down_work, cpu_up_down_work);
 	INIT_DELAYED_WORK(&hima_hotplug_work, hima_hotplug_work_fn);
@@ -288,9 +296,7 @@ static void hima_hotplug_stop(void)
 	flush_workqueue(hima_hotplug_wq);
 	cancel_work_sync(&up_down_work);
 	cancel_delayed_work_sync(&hima_hotplug_work);
-#ifdef CONFIG_STATE_NOTIFIER
-	state_unregister_client(&notif);
-#endif
+	fb_unregister_client(&notif);
 	destroy_workqueue(hima_hotplug_wq);
 }
 
